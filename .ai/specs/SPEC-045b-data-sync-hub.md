@@ -37,6 +37,7 @@ Enterprise integrations move large volumes of data — 100K+ products, millions 
 | 5 | **Progress observable** — real-time progress via the `progress` module (`ProgressService`) and `ProgressTopBar` UI | Admin sees progress bar, ETA, item counts in the unified top bar — no custom progress UI needed |
 | 6 | **Error coherent** — every item-level error is logged via `integrationLog` with entity context | Admin can filter errors, see which products failed, click through to fix |
 | 7 | **Idempotent** — re-running a sync with the same cursor produces the same result | Safe to retry, safe to resume |
+| 8 | **Provider-owned bootstrap defaults** — sync providers own env-backed defaults for credentials, mappings, locales, channels, and enabled state | Fresh installs must not depend on manual setup or core patches |
 
 ---
 
@@ -85,6 +86,23 @@ interface DataSyncAdapter {
   validateConnection?(input: ValidateConnectionInput): Promise<ValidationResult>
 }
 ```
+
+### 3.4 Provider Env Presets for Sync Providers
+
+Data sync providers often need deployment-managed defaults beyond credentials, such as locale, channel selection, family filters, or mapping overrides. Those defaults belong in the provider package.
+
+Rules:
+
+- implement the preset in the provider package, not in `data_sync`
+- apply it from provider `setup.ts`
+- expose a provider CLI rerun path such as `configure-from-env`
+- use canonical env names in the `OM_INTEGRATION_<PROVIDER>_*` namespace
+
+Example names:
+
+- `OM_INTEGRATION_AKENEO_PRODUCT_LOCALE`
+- `OM_INTEGRATION_AKENEO_IMPORT_CHANNELS`
+- `OM_INTEGRATION_AKENEO_PRODUCTS_SETTINGS_JSON`
 
 ### 3.1 Import Types
 
@@ -182,12 +200,12 @@ packages/core/src/modules/data_sync/
 │   ├── sync-engine.ts           # Orchestrates streaming, batching, cursor persistence
 │   ├── sync-run-service.ts      # CRUD for SyncRun entity
 │   ├── sync-schedule-service.ts # SyncSchedule CRUD + schedulerService.register() sync
-│   ├── id-mapping.ts            # lookupLocalId / lookupExternalId / storeExternalIdMapping
+│   ├── id-mapping.ts            # lookupLocalId / lookupExternalId / storeExternalIdMapping (uses integrations-owned mapping table)
 │   ├── transforms.ts            # Built-in field transforms
 │   ├── rate-limiter.ts          # Token-bucket rate limiter for external API throttling
 │   └── entity-writer.ts         # Generic entity upsert using mapping
 ├── data/
-│   ├── entities.ts              # SyncRun, SyncCursor, SyncMapping, SyncExternalIdMapping, SyncSchedule (links to ScheduledJob via scheduledJobId)
+│   ├── entities.ts              # SyncRun, SyncCursor, SyncMapping, SyncSchedule (links to ScheduledJob via scheduledJobId)
 │   └── validators.ts
 ├── api/
 │   ├── post/data-sync/run.ts    # Start a sync run
@@ -1247,31 +1265,9 @@ export default async function handler(job: Job, ctx: WorkerContext) {
 A critical piece for bidirectional sync is knowing which Medusa entity corresponds to which local entity:
 
 ```typescript
-// data_sync/data/entities.ts
-
-@Entity({ tableName: 'sync_external_id_mappings' })
-export class SyncExternalIdMapping extends BaseEntity {
-  @Property()
-  integrationId!: string  // 'sync_medusa'
-
-  @Property()
-  entityType!: string  // 'sales.order', 'catalog.product', 'sales.line_item'
-
-  @Property()
-  localId!: string  // Open Mercato entity ID
-
-  @Property()
-  externalId!: string  // Medusa entity ID
-
-  @Property()
-  organizationId!: string
-
-  @Property()
-  tenantId!: string
-
-  @Unique({ properties: ['integrationId', 'entityType', 'externalId', 'organizationId', 'tenantId'] })
-  _unique!: never
-}
+// integrations/data/entities.ts (canonical)
+// Reused by data_sync via integrations id-mapping service helpers.
+// No duplicate table/entity definition in data_sync.
 ```
 
 Lookup helpers:
@@ -2497,3 +2493,79 @@ export function createRateLimiter(requestsPerSecond: number) {
 | Run Now uses current schedule config | POST `.../run-now` | Uses current `fullSync` setting and resolves cursor accordingly |
 | onTenantCreated re-registers schedules | Setup | After app restart, `onTenantCreated` calls `syncToScheduler()` for all existing `SyncSchedule` entries, ensuring `ScheduledJob` records are in sync |
 | Interval schedule type | POST `/api/data-sync/schedules` with `scheduleType: 'interval'` | `ScheduledJob` registered with `scheduleType: 'interval'`, `scheduleValue: '15m'` |
+
+---
+
+## 10. Migration & Backward Compatibility
+
+1. **External ID mapping ownership**  
+   `sync_external_id_mappings` remains owned by the `integrations` module. `data_sync` reuses existing entity/services through DI. No schema duplication.
+
+2. **Additive-only rollout**  
+   `data_sync` introduces new tables (`sync_runs`, `sync_cursors`, `sync_mappings`, `sync_schedules`) and routes without renaming/removing existing contracts.
+
+3. **Progress and scheduler integration compatibility**  
+   Existing `progress` and `scheduler` APIs are consumed as-is. No signature or route changes are introduced.
+
+4. **Retry semantics stability**  
+   Retry/resume behavior is additive and opt-in through new `data_sync` routes; no existing worker/event contracts are narrowed.
+
+---
+
+## 11. Final Compliance Report — 2026-03-04
+
+### AGENTS.md Files Reviewed
+
+- `AGENTS.md` (root)
+- `packages/core/AGENTS.md`
+- `packages/shared/AGENTS.md`
+- `packages/queue/AGENTS.md`
+- `packages/events/AGENTS.md`
+- `packages/ui/AGENTS.md`
+
+### Compliance Matrix
+
+| Rule Source | Rule | Status | Notes |
+|-------------|------|--------|-------|
+| backward | Additive-only schema changes | Compliant | New sync tables only; existing mapping table reused |
+| core | Worker metadata + idempotency | Compliant | Import/export/scheduled workers use explicit metadata and retry-safe design |
+| core | Tenant scoping + zod validation | Compliant | Required across all run/mapping/schedule APIs |
+| core | API routes export `openApi` | Compliant | Required for every new endpoint |
+| queue | Concurrency bounds | Compliant | Documented import/export/scheduler worker limits |
+
+### Verdict
+
+**Compliant with BC and module contract constraints.**
+
+---
+
+## 12. Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-02-24 | Initial Data Sync Hub draft |
+| 2026-02-24 | Added scheduler and progress integration details |
+| 2026-02-24 | Added `sync_excel` reference implementation |
+| 2026-03-04 | Clarified canonical ownership of `sync_external_id_mappings` and added migration/BC + compliance sections |
+
+## Implementation Status
+
+| Phase | Status | Date | Notes |
+|-------|--------|------|-------|
+| Phase A — Data Sync hub foundation | Done | 2026-03-04 | Added module skeleton, adapter contract, adapter registry, run engine, run service, workers, and core APIs |
+| Phase B — Sync run/progress/log integration | Done | 2026-03-04 | `SyncRun` + `ProgressJob` linkage implemented with status/progress updates and integration log writes |
+| Phase C — Reference provider (`sync_medusa`) | In Progress | 2026-03-04 | Added bundle manifest + baseline adapters; outbound subscribers/webhooks/full lifecycle mapping pending |
+| Phase D — Scheduler/UI/extensions | Not Started | — | Scheduling CRUD + sync-scheduled worker behavior + admin widgets/pages pending |
+
+### Phase A/B — Detailed Progress
+- [x] Step 1: Create `data_sync` module structure with ACL/setup/events/DI
+- [x] Step 2: Add `SyncRun`, `SyncCursor`, `SyncMapping`, `SyncSchedule` entities
+- [x] Step 3: Add adapter contract + adapter registry
+- [x] Step 4: Add sync run service (`create/list/detail/status/cursor`)
+- [x] Step 5: Add sync engine for import/export streaming loop and run lifecycle updates
+- [x] Step 6: Add workers (`sync-import`, `sync-export`, `sync-scheduled` placeholder)
+- [x] Step 7: Add APIs (`run`, `runs`, `runs/:id`, `cancel`, `retry`, `validate`)
+- [x] Step 8: Add `sync_medusa` bundle manifest + baseline adapters
+- [ ] Step 9: Implement scheduler service synchronization and run-now/toggle/delete schedule APIs
+- [ ] Step 10: Implement mapping CRUD APIs/widgets and dashboard/detail pages
+- [ ] Step 11: Implement outbound subscribers, webhook ingestion, and loop-prevention metadata

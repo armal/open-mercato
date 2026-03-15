@@ -198,7 +198,6 @@ At minimum, set `DATABASE_URL`, `JWT_SECRET`, and `REDIS_URL` (or `EVENTS_REDIS_
 
 Yarn 4 is now required. Ensure you have Yarn 4+ installed before proceeding.
 
-
 ## Getting Started
 
 
@@ -246,6 +245,14 @@ yarn initialize # or yarn reinstall
 yarn dev
 ```
 
+After upgrading to a newer version, apply any new module migrations:
+
+```bash
+yarn db:migrate
+```
+
+Note: `yarn initialize` seeds demo data and may abort if users already exist. For upgrades on an existing database, use `yarn db:migrate` instead.
+
 For a fresh greenfield boot (build packages, generate registries, reinstall modules, then start dev), run:
 
 ```bash
@@ -279,6 +286,21 @@ docker compose -f docker-compose.fullapp.dev.yml up --build
 
 **Windows users:** Ensure WSL 2 backend is enabled in Docker Desktop and clone with `git config --global core.autocrlf input` to avoid line-ending issues.
 
+Once the dev stack is running, you can use the Docker wrapper scripts from the repo root instead of typing `docker compose exec` manually:
+
+```bash
+yarn docker:build:packages
+yarn docker:generate
+yarn docker:initialize
+yarn docker:initialize -- --reinstall
+yarn docker:db:migrate
+yarn docker:lint
+yarn docker:typecheck
+yarn docker:test
+yarn docker:install-skills
+yarn docker:dev -- --skip-rebuilt
+```
+
 ### Production mode
 
 ```bash
@@ -291,6 +313,13 @@ docker compose -f docker-compose.fullapp.yml up --build
 - Logs: `docker compose -f docker-compose.fullapp.yml logs -f app`
 - Stop: `docker compose -f docker-compose.fullapp.yml down`
 - Rebuild: `docker compose -f docker-compose.fullapp.yml up --build`
+
+For runtime-oriented tasks on the fullapp stack, use the Docker wrappers as well:
+
+```bash
+yarn docker:db:migrate
+yarn docker:mercato auth:list-users
+```
 
 Navigate to `http://localhost:3000/backend` and sign in with the default credentials (admin@example.com).
 
@@ -321,11 +350,60 @@ MEILISEARCH_MASTER_KEY=your-strong-meilisearch-key
 OPENAI_API_KEY=sk-...  # Optional, for AI features
 ```
 
+### Ephemeral Environments
+
+Spin up a self-contained, throwaway environment for quick testing or previewing a branch — no local database, or full dev setup required. Each run starts with a fresh database and is automatically reset on restart.
+
+```bash
+docker compose -f docker-compose.preview.yaml up --build
+```
+
+Navigate to `http://localhost:5000`.
+
+To stop the environment:
+
+```bash
+docker compose -f docker-compose.preview.yaml down
+```
+
+> **Attention:** This type of deployment is ephemeral and intended for testing purposes only. After stopping the containers, all data will be lost. Do not use this setup in production.
+
+
+### Deploy on Railway
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/TKvo95)
+
+One-click deployment on [Railway](https://railway.com) with PostgreSQL (pgvector), Redis, and Meilisearch provisioned automatically.
+
+> **Note:** Open Mercato requires at least **2 GB of memory**. The Railway **Hobby plan** (or higher) is required — the free tier is not sufficient.
+
+See the [Railway deployment guide](https://docs.openmercato.com/installation/railway) for environment variables, first-boot setup, and custom domain configuration.
+
 ### VPS Deployment
 
 [![Watch: Deploy Open Mercato on a VPS](https://img.youtube.com/vi/xau17YBP9ek/maxresdefault.jpg)](https://www.youtube.com/watch?v=xau17YBP9ek)
 
 For production deployments, ensure strong `JWT_SECRET`, secure database credentials, and consider managed database services. See the [full Docker deployment guide](https://docs.openmercato.com/installation/setup#docker-deployment-full-stack) for detailed configuration and production tips.
+
+### Dev Container (VS Code)
+
+The fastest way to get a fully working dev environment — no local toolchain required.
+
+**Prerequisites**: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (12 GB+ memory in Settings → Resources) + VS Code with the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension.
+
+```bash
+git clone https://github.com/open-mercato/open-mercato.git
+code open-mercato
+# VS Code → Command Palette → "Dev Containers: Reopen in Container"
+# Wait for setup to complete (~3-5 min on first build), then:
+yarn dev
+```
+
+The container includes Node.js 24, Yarn 4, PostgreSQL (with pgvector), Redis, Meilisearch, and Claude Code CLI — all pre-configured and ready to use.
+
+- **Customize env vars**: create `apps/mercato/.env.local` (takes priority over `.env`, which is auto-generated)
+- **Claude Code CLI**: run `claude` inside the container and follow the OAuth login flow (works with Max plan subscriptions), or set `export ANTHROPIC_API_KEY=sk-...` in your host shell before opening the container for API key auth
+- **Rebuild**: if you need a fresh start, use Command Palette → "Dev Containers: Rebuild Container"
 
 ## Standalone App & Customization
 

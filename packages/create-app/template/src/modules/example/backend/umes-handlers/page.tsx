@@ -15,7 +15,7 @@ function print(value: unknown) {
   return JSON.stringify(value ?? null)
 }
 
-const hintClassName = 'inline-flex items-center rounded-md border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs text-amber-100/90'
+const hintClassName = 'inline-flex items-center rounded-md border border-amber-500/40 bg-amber-50 dark:bg-amber-400/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-100/90'
 
 type CustomerRecord = {
   id?: string
@@ -152,7 +152,7 @@ export default function UmesHandlersPage() {
       const params = new URLSearchParams()
       params.set('pageSize', '5')
       if (personId.trim().length > 0) {
-        params.set('id', personId.trim())
+        params.set('ids', personId.trim())
       }
       const payload = await readApiResultOrThrow<CustomersResponse>(`/api/customers/people?${params.toString()}`)
       const items = readCustomerItems(payload)

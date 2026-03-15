@@ -14,6 +14,7 @@ const sidebars: SidebarsConfig = {
       items: [
         "installation/prerequisites",
         "installation/setup",
+        "installation/railway",
         {
           type: "link",
           label: "Standalone App (create-mercato-app)",
@@ -64,6 +65,16 @@ const sidebars: SidebarsConfig = {
             "user-guide/sales/adjustments",
             "user-guide/sales/order-items",
             "user-guide/sales/sales-settings",
+          ],
+        },
+        {
+          type: "category",
+          label: "Integrations & Payments",
+          items: [
+            "user-guide/integrations",
+            "user-guide/akeneo-pim",
+            "user-guide/stripe-payments",
+            "user-guide/payment-transactions",
           ],
         },
         {
@@ -119,6 +130,16 @@ const sidebars: SidebarsConfig = {
       items: [
         "enterprise/overview",
         "enterprise/record-locks",
+        {
+          type: "category",
+          label: "Single Sign-On (SSO)",
+          items: [
+            "enterprise/sso/index",
+            "enterprise/sso/entra-id-setup",
+            "enterprise/sso/google-workspace-setup",
+            "enterprise/sso/zitadel-setup",
+          ],
+        },
       ],
     },
     {
@@ -134,6 +155,8 @@ const sidebars: SidebarsConfig = {
             "api/directory",
             "api/dashboards",
             "api/customers",
+            "api/integrations-data-sync",
+            "api/payment-gateways",
             "api/entities",
             "api/attachments",
             "api/vector",
@@ -246,8 +269,24 @@ const sidebars: SidebarsConfig = {
             "framework/modules/notifications",
             "framework/modules/messages",
             "framework/modules/currencies",
+            "framework/modules/integrations-data-sync",
             "framework/modules/sales-providers",
             "framework/modules/sales-calculations",
+            "framework/modules/payment-gateways",
+            "framework/modules/shipping-carriers",
+            "framework/modules/building-gateway-provider",
+          ],
+        },
+        {
+          type: "category",
+          label: "Extensibility Directory",
+          items: [
+            "framework/extensibility/index",
+            "framework/extensibility/current-surfaces",
+            "framework/extensibility/umes-phases",
+            "framework/extensibility/integration-enhancements",
+            "framework/extensibility/query-engine-extensibility",
+            "framework/extensibility/umes-2-09-roadmap",
           ],
         },
         "framework/commands/overview",
@@ -299,6 +338,7 @@ const sidebars: SidebarsConfig = {
             "framework/events/queue-workers",
           ],
         },
+        "framework/webhooks/overview",
         "framework/pricing-tax-overrides",
         "framework/rbac/overview",
         "framework/feature-toggles/overview",

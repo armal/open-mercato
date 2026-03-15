@@ -405,6 +405,10 @@ const updateUserCommand: CommandHandler<Record<string, unknown>, User> = {
     }
     if (!user) throw new CrudHttpError(404, { error: 'User not found' })
 
+    if (hashed) {
+      await em.nativeDelete(Session, { user: parsed.id })
+    }
+
     if (Array.isArray(parsed.roles)) {
       await syncUserRoles(em, user, parsed.roles, user.tenantId ? String(user.tenantId) : tenantId ?? null)
     }
@@ -741,7 +745,7 @@ async function loadUserRoleNames(em: EntityManager, userId: string): Promise<str
   const names = links
     .map((link) => link.role?.name ?? '')
     .filter((name): name is string => !!name)
-  return Array.from(new Set(names)).sort()
+  return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
 }
 
 function serializeUser(user: User, roles: string[], custom?: Record<string, unknown> | null): SerializedUser {

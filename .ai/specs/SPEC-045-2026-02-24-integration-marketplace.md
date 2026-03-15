@@ -5,7 +5,7 @@
 | **Status** | Draft |
 | **Author** | Piotr Karwatka |
 | **Created** | 2026-02-24 |
-| **Related** | SPEC-041 (UMES), SPEC-044 (Payment Gateways), Issue #676, PR #674 (WhatsApp/External Channels) |
+| **Related** | SPEC-041 (UMES), SPEC-044 (Payment Gateways), SPEC-057 (Webhooks Module), Issue #676, PR #674 (WhatsApp/External Channels) |
 
 ## TLDR
 
@@ -66,6 +66,7 @@ See [SPEC-045a §1.2](./SPEC-045a-foundation.md#12-integration-bundles) for the 
 | 6 | **Runtime enable/disable** — per tenant without code changes | `IntegrationState` entity |
 | 7 | **Versioned adapters** — one integration ships multiple API versions; tenants pick which to use | External APIs evolve; tenants upgrade at their own pace |
 | 8 | **Zero core module modifications** — integrations extend via UMES, events, DI | Community can contribute independently |
+| 9 | **Provider-owned env preconfiguration** — integrations bootstrap themselves from deployment env inside the provider package | Fresh installs and infra automation must not require core patches |
 
 ---
 
@@ -77,9 +78,9 @@ See [SPEC-045a §1.2](./SPEC-045a-foundation.md#12-integration-bundles) for the 
 | `shipping` | `shipping_carriers` | `ShippingAdapter` | 3 | DHL, UPS, InPost |
 | `communication` | `communication_channels` | `ChannelAdapter` | 4 | WhatsApp, Twilio |
 | `notification` | `notification_providers` | `NotificationTransportAdapter` | 4 | SendGrid, Mailgun |
-| `storage` | `storage_providers` | `StorageAdapter` | 5 | S3, MinIO, local |
+| `storage` | `storage_providers` | `StorageAdapter` | 5a | S3, MinIO, local | See [SPEC-045i](./SPEC-045i-storage-hub.md) |
 | `data_sync` | `data_sync` | `DataSyncAdapter` | 2 | MedusaJS, CSV, Shopify |
-| `webhook` | `webhook_endpoints` | `WebhookEndpointAdapter` | 5 | Custom, Zapier |
+| `webhook` | `webhook_endpoints` | `WebhookEndpointAdapter` | 5b | Custom, Zapier | See [SPEC-057](./SPEC-057-2026-03-04-webhooks-module.md) |
 
 ### Future Categories (Not in Scope)
 
@@ -100,7 +101,8 @@ The full spec is split into focused phase documents:
 | **2** | [SPEC-045b — Data Sync Hub](./SPEC-045b-data-sync-hub.md) | `data_sync` hub with delta-based streaming, queue processing, resumable imports, progress tracking, error logging. MedusaJS bundle as reference implementation |
 | **3** | [SPEC-045c — Payment & Shipping Hubs](./SPEC-045c-payment-shipping-hubs.md) | Align SPEC-044 with marketplace + build `shipping_carriers` hub |
 | **4** | [SPEC-045d — Communication & Notification Hubs](./SPEC-045d-communication-notification-hubs.md) | `communication_channels` hub (align PR #674) + `notification_providers` hub |
-| **5** | [SPEC-045e — Storage & Webhook Hubs](./SPEC-045e-storage-webhook-hubs.md) | `storage_providers` hub + `webhook_endpoints` hub |
+| **5a** | [SPEC-045i — Storage Providers Hub](./SPEC-045i-storage-hub.md) | `storage_providers` hub with pluggable drivers (local, S3, database) |
+| **5b** | [SPEC-045e — Webhook Endpoints Hub](./SPEC-045e-webhook-hub.md) | `webhook_endpoints` hub (delegates to [SPEC-057](./SPEC-057-2026-03-04-webhooks-module.md)) |
 | **6** | [SPEC-045f — Health Monitoring](./SPEC-045f-health-monitoring.md) | Scheduled health checks, marketplace search/filtering, usage analytics |
 
 ### Provider-Specific Specifications
@@ -140,6 +142,26 @@ Integrations without `apiVersions` are treated as single-version (unversioned) �
 ### Credentials API
 
 Unified encrypted per-tenant store. Bundle integrations inherit bundle credentials via fallthrough. Secret fields masked on read (`'••••••••'`). Supports **OAuth 2.0 credential type** for third-party app authentication (Google, Microsoft, GitHub, Slack) — admin creates their own OAuth app, connects via consent screen, tokens stored encrypted with background renewal. See [SPEC-045a §2](./SPEC-045a-foundation.md#2-credentials-api) and [SPEC-045a §8](./SPEC-045a-foundation.md#8-oauth-20-credential-type--third-party-app-authentication).
+
+### Provider-Owned Env Preconfiguration
+
+Integrations may need credentials, default mappings, locale/channel defaults, enabled state, or API version immediately after a fresh install. This bootstrap capability belongs in the provider package, not in core modules.
+
+Contract:
+
+- Providers read deployment env vars in provider-local helpers such as `lib/preset.ts`
+- Providers apply those presets from their own `setup.ts`
+- Providers expose a rerunnable provider CLI command such as `configure-from-env`
+- Providers persist through normal integration services (`IntegrationCredentials`, `IntegrationState`, hub mapping APIs), never through provider-specific branches in core
+- Canonical env names MUST use the `OM_INTEGRATION_<PROVIDER>_*` pattern
+- Backward-compatible aliases may be accepted, but docs/examples must present `OM_INTEGRATION_<PROVIDER>_*` as the primary surface
+
+Examples:
+
+- `OM_INTEGRATION_AKENEO_API_URL`
+- `OM_INTEGRATION_AKENEO_PRODUCT_LOCALE`
+- `OM_INTEGRATION_STRIPE_SECRET_KEY`
+- `OM_INTEGRATION_STRIPE_API_VERSION`
 
 ### Operation Logs
 
@@ -227,6 +249,11 @@ Becomes `communication_channels` hub. WhatsApp becomes first spoke. See [SPEC-04
 - **Mitigation**: Transaction wraps credential save; documented in ops runbook. Admin re-enters credentials.
 - **Residual risk**: Downtime for affected integrations until re-configured.
 
+#### Misnamed Provider Env Variables
+- **Scenario**: Providers ship inconsistent env prefixes (`OPENMERCATO_*`, custom names, unprefixed names), causing failed automation and unclear docs
+- **Mitigation**: Canonical naming contract is `OM_INTEGRATION_<PROVIDER>_*`; provider docs and builder guidance must use that surface. Aliases are optional compatibility shims only.
+- **Residual risk**: Existing deployments may still use legacy aliases; mitigated by alias support during migration.
+
 ### Medium Risks
 
 #### Health Check Timeout
@@ -244,6 +271,32 @@ Becomes `communication_channels` hub. WhatsApp becomes first spoke. See [SPEC-04
 
 #### New Tables Only (Migration)
 - **Mitigation**: Additive-only migration, zero-downtime safe.
+
+---
+
+## Migration & Backward Compatibility
+
+This spec family introduces new infrastructure while preserving existing contracts. The implementation MUST follow bridge-first rollout:
+
+1. **`IntegrationDefinition` evolution is additive-only**  
+   Existing `IntegrationDefinition` fields (`id`, `title`, optional `icon`, optional `buildExternalUrl`) remain valid. New marketplace metadata is optional in the base type and validated only where required (admin marketplace UI and integration APIs).
+
+2. **Payment credential migration uses dual-read/dual-write**  
+   During bridge period, payment providers read credentials from `IntegrationCredentials` first, then fallback to `SalesPaymentMethod.providerSettings`.  
+   Writes from config UI update both stores.  
+   Removal of fallback is allowed only after one minor version + migration notice in `RELEASE_NOTES.md`.
+
+3. **External ID mapping table remains canonical**  
+   `sync_external_id_mappings` is owned by the `integrations` module. `data_sync` consumes it via shared services/DI. No duplicate entity/table definitions are introduced.
+
+4. **Generated contracts are additive-only**  
+   Generator support for `integration.ts` and bundles may add new generated files/exports, but MUST NOT break existing generated file exports consumed by bootstrap.
+
+5. **Event/route stability rules**  
+   Existing event IDs and API routes remain untouched. New IDs/routes are additive. Any future retirements require dual-emit/deprecation bridge.
+
+6. **Env preset naming is standardized**
+   New provider presets MUST use `OM_INTEGRATION_<PROVIDER>_*` as the canonical env surface. Legacy aliases such as `OPENMERCATO_<PROVIDER>_*` or `<PROVIDER>_*` may be read for backward compatibility, but must not be the documented primary names.
 
 ---
 
@@ -304,3 +357,6 @@ Becomes `communication_channels` hub. WhatsApp becomes first spoke. See [SPEC-04
 | 2026-02-24 | Added SPEC-045h — Stripe Payment Gateway: reference provider implementation with versioned adapters, webhook processing, config widget injection, health check, and full integration test coverage |
 | 2026-02-24 | Updated SPEC-045b to use progress module (SPEC-004 / PR #645): `SyncRun` delegates progress tracking to `ProgressJob` via `progressJobId`, sync engine uses `ProgressService` for percent/ETA/heartbeat/stale detection, progress visible in `ProgressTopBar` automatically |
 | 2026-02-24 | Updated SPEC-045b scheduler integration: replaced custom `sync-scheduler.ts` polling worker with proper `packages/scheduler` integration via `schedulerService.register()`. Added detailed execution flow, overlap prevention, two-strategy architecture (local/async), DI registration, and 16 scheduler integration tests |
+| 2026-03-04 | Added explicit "Migration & Backward Compatibility" section with bridge rules for type evolution, payment credential migration, canonical external ID mapping ownership, and generated contract stability |
+| 2026-03-10 | Split Phase 5 into 5a (SPEC-045i — Storage Providers Hub, merged with SPEC-058) and 5b (SPEC-045e — Webhook Endpoints Hub). Old combined SPEC-045e removed. |
+| 2026-03-12 | Added provider-owned env preconfiguration contract and canonical env naming rule: `OM_INTEGRATION_<PROVIDER>_*`; documented rerunnable `configure-from-env` provider CLI pattern and clarified aliases are compatibility-only |
